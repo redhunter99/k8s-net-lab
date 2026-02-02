@@ -28,40 +28,66 @@ Every concept is verified using real Linux commands.
 kubectl create ns test
 
 
+
+
+
 📦 Pod Manifests Used
-pinger.yaml and app.yaml
+
+This lab uses two Pods, both scheduled on the same node to study networking behavior.
+
+pinger.yaml
+
+app.yaml
+
+Apply the manifests:
+
 kubectl apply -f pinger.yaml
 kubectl apply -f app.yaml
 
 
-Verify pods:
+Verify Pod status and node placement:
 
 kubectl get pods -n test -o wide
 
-🧠 Step 1: What happens when a Pod runs?
 
-When a Pod is created:
+This confirms:
+
+Pods are running
+
+Pods are attached to the expected node
+
+🧠 Step 1: What Happens When a Pod Runs?
+
+When a Pod is created, Kubernetes performs the following:
 
 Kubernetes first creates a pause container
 
-Pause container holds:
+The pause container owns:
 
-network namespace
+Network namespace
 
 IPC namespace
 
 UTS namespace
 
-All containers in the pod share this namespace
+Application containers join the pause container’s namespaces
+
+Why this matters:
+
+All containers in a Pod share the same IP
+
+All containers share the same network interfaces
+
+Pod networking is namespace-based, not container-based
 
 🔍 Step 2: Identify the Pause Container
 
-Create a sample pod:
+Create a temporary Pod:
 
 kubectl run nginx --image=nginx
 
 
-List namespaces:
+List namespaces and locate the pause container:
 
 lsns | grep nginx
 
@@ -70,14 +96,18 @@ Copy the PID and inspect it:
 
 lsns -p <PID>
 
-
-This confirms:
+What this proves:
 
 Pause container owns the network namespace
 
-Application containers join it
+Application containers attach to it
 
-🔍 Step 3: List All Network Namespaces
+Pod networking is NOT container-specific
+
+🔍 Step 3: List All Network Namespaces on the Node
+
+List namespaces using either method:
+
 ip netns list
 
 
@@ -86,45 +116,51 @@ OR:
 ls -lt /var/run/netns
 
 
-Each entry represents one pod network namespace.
+Each entry corresponds to one Pod network namespace created by the CNI plugin.
 
-🔍 Step 4: Inspect Pod Network Namespace
+🔍 Step 4: Enter a Pod Network Namespace from the Node
 
-Replace <namespace> with actual netns ID:
+Replace <namespace-id> with an actual namespace ID:
 
-ip netns exec <namespace> ip link
+ip netns exec <namespace-id> ip link
 
 
-You will see:
+Expected output:
 
 lo
-
 eth0@ifX
 
-📌 Meaning:
+Meaning:
 
-eth0 → pod interface
+eth0 → Pod network interface
 
-ifX → peer interface index on the node
+ifX → peer interface index on the Node
 
-🔍 Step 5: Inspect Pod Interfaces from Inside the Pod
+👉 This proves the Pod is connected via a veth pair, not directly to the NIC.
+
+🔍 Step 5: Inspect Network Interfaces from Inside the Pod
+
+Run inside the Pod:
+
 kubectl exec -it pinger -n test -- ip addr
 
 
 Observe:
 
-Pod IP is /32
+Pod IP assigned as /32
 
 Interface shown as eth0@ifX
 
-🔁 Step 6: Map Pod eth0 to Node veth
+👉 Pod routing is handled by the Node.
 
-From the node:
+🔁 Step 6: Map Pod eth0 to Node veth Interface
+
+From the Node, list interfaces:
 
 ip link show
 
 
-Search using interface index:
+Search using the interface index from eth0@ifX:
 
 ip link | grep -A1 ^X:
 
@@ -134,18 +170,19 @@ You will find something like:
 caliXXXX@ifY
 link-netns <netns-id>
 
-
-✅ This confirms:
-
-Pod eth0  <---- veth pair ---->  caliXXXX (node)
+This confirms:
+Pod eth0  <---- veth pair ---->  caliXXXX (Node)
 
 🔍 Step 7: List All Calico veth Interfaces
 ip link show | grep cali
 
 
-Each caliXXXX represents one pod attached to the node.
+Each caliXXXX interface represents one Pod attached to the Node.
 
 🔬 Step 8: Verify veth Pair Connectivity
+
+Verify the veth pair using ethtool:
+
 ethtool -S caliXXXX
 
 
@@ -153,10 +190,11 @@ Look for:
 
 peer_ifindex
 
-
 This proves:
 
 Both ends belong to the same veth pair
+
+Pod ↔ Node connectivity is direct
 
 🧠 Mental Model (IMPORTANT)
 [ Pod Network Namespace ]
@@ -170,31 +208,46 @@ caliXXXX
 
 Pod traffic exits via eth0
 
-Enters node via caliXXXX
+Enters the Node via caliXXXX
 
 Linux kernel handles forwarding
 
-📌 Useful Commands Reference
-ip link show
-ip netns list
+📌 All Commands Used in This Lab (Single Place)
+kubectl create ns test
+kubectl apply -f pinger.yaml
+kubectl apply -f app.yaml
+kubectl get pods -n test -o wide
+
+kubectl run nginx --image=nginx
+
 lsns
 lsns -p <pid>
+
+ip netns list
 ls -lt /var/run/netns
 ip netns exec <netns> ip link
+
 kubectl exec -it <pod> -- ip addr
+
+ip link show
 ip link | grep cali
+ip link | grep -A1 ^X:
+
 ethtool -S caliXXXX
 
-✅ What We Have Proven
+✅ What We Have Proven in This Lab
 
 Pods run inside isolated network namespaces
 
 Pause container owns the namespace
 
-Pod eth0 is connected to node using veth pairs
+Pod eth0 is one end of a veth pair
 
-Calico creates caliXXXX interfaces on the node
+Node caliXXXX is the other end
 
-Pod networking is pure Linux kernel networking
+Calico uses Linux kernel networking
+
+Pod networking is NOT Kubernetes magic
+
 
 
