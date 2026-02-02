@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pinger
+  namespace: test
+  labels:
+    app: pinger
+spec:
+  nodeName: worker01
+  containers:
+  - name: pinger
+    image: quay.io/ysachin/cilium/pinger:v1
+    imagePullPolicy: Always
+    securityContext:
+      privileged: true
